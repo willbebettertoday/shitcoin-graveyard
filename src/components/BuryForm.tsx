@@ -39,7 +39,7 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
   const [tokenError, setTokenError] = useState('');
   const [step, setStep] = useState<'idle' | 'approving' | 'burying' | 'done'>('idle');
 
-  // Scanner & UI State
+  // Scanner & Custom UI State
   const [userTokens, setUserTokens] = useState<TokenData[]>([]);
   const [isScanning, setIsScanning] = useState(false);
   const [useCustomMode, setUseCustomMode] = useState(false);
@@ -51,7 +51,7 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
 
   const { writeContractAsync } = useWriteContract();
 
-  // Aggressive Scan wallet using Blockscout API
+  // Scan wallet using Blockscout API
   useEffect(() => {
     if (!address) {
       setUserTokens([]);
@@ -64,7 +64,6 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
         const res = await fetch(`https://base.blockscout.com/api/v2/addresses/${address}/token-balances`);
         const data = await res.json();
 
-        // Blockscout returns data in { items: [...] } or directly as array
         const items = Array.isArray(data) ? data : (data.items || []);
 
         if (items && items.length > 0) {
@@ -172,9 +171,9 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true }}
       transition={{ duration: 0.5 }}
-      className="bg-surface border border-border rounded-2xl p-6 sm:p-8 md:p-10 max-w-xl"
+      className="bg-surface border border-border rounded-2xl p-6 sm:p-8 md:p-10 max-w-xl relative"
     >
-      {/* Click Outside Overlay for Dropdown */}
+      {/* Invisible overlay to close dropdown when clicking outside */}
       {isDropdownOpen && (
         <div
           className="fixed inset-0 z-30"
@@ -195,65 +194,82 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
         </div>
 
         {!isConnected ? (
-          <div className="w-full px-4 py-3.5 bg-bg border border-border rounded-xl text-sm text-t3 text-center">
+          <div className="w-full px-4 py-4 bg-bg border border-border rounded-xl text-sm text-t3 text-center">
             Connect wallet to scan your tokens
           </div>
         ) : !useCustomMode ? (
           <div className="relative z-40">
             {isScanning ? (
-              <div className="w-full px-4 py-3.5 bg-bg border border-border rounded-xl text-sm text-t3 flex items-center justify-center">
+              <div className="w-full px-4 py-4 bg-bg border border-border rounded-xl text-sm text-t3 flex items-center justify-center">
                 <span className="spinner" /> Scanning for dead tokens...
               </div>
             ) : userTokens.length === 0 ? (
-              <div className="w-full px-4 py-3.5 bg-bg border border-border rounded-xl text-sm text-t3 text-center">
+              <div className="w-full px-4 py-4 bg-bg border border-border rounded-xl text-sm text-t3 text-center">
                 No tokens found. <button onClick={() => setUseCustomMode(true)} className="text-accent underline">Paste address</button>
               </div>
             ) : (
               <>
+                {/* Premium Custom Trigger Button */}
                 <button
                   type="button"
                   onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                  className="w-full px-4 py-3.5 bg-bg border border-border rounded-xl font-mono text-sm text-t1 outline-none focus:border-accent/40 transition-colors flex justify-between items-center text-left"
+                  className={`w-full px-4 py-3.5 bg-bg border rounded-xl transition-all flex justify-between items-center text-left group ${isDropdownOpen ? 'border-accent/50 shadow-[0_0_15px_rgba(201,168,124,0.1)]' : 'border-border hover:border-border/80'}`}
                 >
                   {tokenInfo ? (
-                    <span className="truncate pr-4">
-                      {parseFloat(tokenInfo.balance).toFixed(2)} <span className="text-accent font-bold">${tokenInfo.symbol}</span>
-                    </span>
+                    <div className="flex flex-col overflow-hidden pr-4">
+                      <span className="font-mono text-sm text-t1 font-bold">
+                        {parseFloat(tokenInfo.balance).toLocaleString('en-US', { maximumFractionDigits: 4 })} <span className="text-accent">${tokenInfo.symbol}</span>
+                      </span>
+                      <span className="text-[11px] text-t3 mt-0.5 truncate max-w-[200px] sm:max-w-[300px]">
+                        {tokenInfo.name}
+                      </span>
+                    </div>
                   ) : (
-                    <span className="text-t3">-- Click to select a shitcoin --</span>
+                    <span className="text-t3 text-sm">-- Select a token from your wallet --</span>
                   )}
-                  <span className={`text-t3 transition-transform duration-300 ${isDropdownOpen ? 'rotate-180' : ''}`}>▼</span>
+                  <svg
+                    className={`w-4 h-4 text-t3 transition-transform duration-300 shrink-0 ${isDropdownOpen ? 'rotate-180 text-accent' : 'group-hover:text-t2'}`}
+                    fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
                 </button>
 
+                {/* Premium Custom Dropdown Menu */}
                 <AnimatePresence>
                   {isDropdownOpen && (
                     <motion.div
                       initial={{ opacity: 0, y: -10, scale: 0.98 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: -10, scale: 0.98 }}
-                      transition={{ duration: 0.2 }}
-                      className="absolute top-full left-0 right-0 mt-2 bg-surface2 border border-border rounded-xl shadow-2xl overflow-hidden max-h-64 overflow-y-auto backdrop-blur-xl"
+                      transition={{ duration: 0.15, ease: "easeOut" }}
+                      className="absolute top-full left-0 right-0 mt-2 bg-surface2/95 backdrop-blur-xl border border-border rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.8)] overflow-hidden"
                     >
-                      {userTokens.map(t => (
-                        <button
-                          key={t.address}
-                          type="button"
-                          onClick={() => handleSelectToken(t)}
-                          className="w-full px-4 py-3 flex justify-between items-center text-left hover:bg-white/[0.03] border-b border-border/50 last:border-0 transition-colors group"
-                        >
-                          <div className="flex flex-col overflow-hidden pr-4">
-                            <span className="font-mono text-sm font-bold text-t1 group-hover:text-accent transition-colors">
-                              ${t.symbol}
-                            </span>
-                            <span className="text-[10px] text-t3 truncate uppercase mt-0.5">
-                              {t.name}
-                            </span>
-                          </div>
-                          <span className="font-mono text-xs text-t2 shrink-0">
-                            {parseFloat(t.balance).toFixed(2)}
-                          </span>
-                        </button>
-                      ))}
+                      <div className="max-h-[280px] overflow-y-auto p-1">
+                        {userTokens.map(t => (
+                          <button
+                            key={t.address}
+                            type="button"
+                            onClick={() => handleSelectToken(t)}
+                            className="w-full text-left p-3 flex justify-between items-center rounded-lg hover:bg-accent/10 transition-colors group"
+                          >
+                            <div className="flex flex-col overflow-hidden pr-4 w-2/3">
+                              <span className="font-mono text-sm font-bold text-t1 group-hover:text-accent transition-colors truncate">
+                                ${t.symbol}
+                              </span>
+                              <span className="text-[11px] text-t3 truncate mt-0.5">
+                                {t.name}
+                              </span>
+                            </div>
+                            <div className="flex flex-col items-end shrink-0 w-1/3">
+                              <span className="font-mono text-sm font-medium text-t1 truncate max-w-full">
+                                {parseFloat(t.balance).toLocaleString('en-US', { maximumFractionDigits: 2 })}
+                              </span>
+                              <span className="text-[10px] text-t3">Balance</span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
                     </motion.div>
                   )}
                 </AnimatePresence>
