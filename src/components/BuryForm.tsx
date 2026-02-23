@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useAccount, useReadContract, useWriteContract } from 'wagmi';
 import { parseUnits, formatUnits, isAddress } from 'viem';
 import { readContract } from '@wagmi/core';
 import { CONTRACT_ADDRESS, GRAVEYARD_ABI, ERC20_ABI, config } from '@/lib/config';
@@ -22,14 +22,27 @@ const EPITAPHS = [
   "I was told this was the next Bitcoin. It wasn't even the next BitConnect.",
 ];
 
+interface TokenData {
+  address: string;
+  name: string;
+  symbol: string;
+  decimals: number;
+  balance: string;
+}
+
 export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
   const { address, isConnected } = useAccount();
   const [tokenAddr, setTokenAddr] = useState('');
   const [amount, setAmount] = useState('');
   const [epitaph, setEpitaph] = useState('');
-  const [tokenInfo, setTokenInfo] = useState<{ name: string; symbol: string; decimals: number; balance: string } | null>(null);
+  const [tokenInfo, setTokenInfo] = useState<TokenData | null>(null);
   const [tokenError, setTokenError] = useState('');
   const [step, setStep] = useState<'idle' | 'approving' | 'burying' | 'done'>('idle');
+
+  // New state for Auto-Discovery
+  const [userTokens, setUserTokens] = useState<TokenData[]>([]);
+  const [isScanning, setIsScanning] = useState(false);
+  const [useCustomMode, setUseCustomMode] = useState(false);
 
   const { data: fee } = useReadContract({
     address: CONTRACT_ADDRESS, abi: GRAVEYARD_ABI, functionName: 'burialFee',
@@ -37,6 +50,41 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
 
   const { writeContractAsync } = useWriteContract();
 
+  // Scan wallet for tokens using Blockscout API
+  useEffect(() => {
+    if (!address) {
+      setUserTokens([]);
+      return;
+    }
+
+    const fetchTokens = async () => {
+      setIsScanning(true);
+      try {
+        const res = await fetch(`https://base.blockscout.com/api/v2/addresses/${address}/token-balances`);
+        const data = await res.json();
+
+        if (data && Array.isArray(data)) {
+          const erc20 = data
+            .filter((t: any) => t.token?.type === 'ERC-20' && t.value !== '0')
+            .map((t: any) => ({
+              address: t.token.address,
+              name: t.token.name || 'Unknown',
+              symbol: t.token.symbol || '???',
+              decimals: Number(t.token.decimals || 18),
+              balance: formatUnits(BigInt(t.value), Number(t.token.decimals || 18))
+            }));
+          setUserTokens(erc20);
+        }
+      } catch (e) {
+        console.error('Failed to scan wallet tokens:', e);
+      }
+      setIsScanning(false);
+    };
+
+    fetchTokens();
+  }, [address]);
+
+  // Manual lookup for custom mode
   const lookupToken = useCallback(async (addr: string) => {
     setTokenInfo(null);
     setTokenError('');
@@ -57,11 +105,28 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
         balance = formatUnits(bal as bigint, decimals as number);
       }
 
-      setTokenInfo({ name: name as string, symbol: symbol as string, decimals: decimals as number, balance });
+      setTokenInfo({ address: addr, name: name as string, symbol: symbol as string, decimals: decimals as number, balance });
     } catch {
       setTokenError('Could not read token');
     }
   }, [address]);
+
+  // Handle Token Selection from Dropdown
+  const handleSelectToken = (selectedAddress: string) => {
+    if (!selectedAddress) {
+      setTokenAddr('');
+      setTokenInfo(null);
+      setAmount('');
+      return;
+    }
+    const token = userTokens.find(t => t.address === selectedAddress);
+    if (token) {
+      setTokenAddr(token.address);
+      setTokenInfo(token);
+      setAmount(token.balance); // Auto-fill max balance!
+      setTokenError('');
+    }
+  };
 
   const handleBury = async () => {
     if (!isConnected || !address || !tokenInfo || !fee) return;
@@ -82,7 +147,6 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
           address: tokenAddr as `0x${string}`, abi: ERC20_ABI, functionName: 'approve',
           args: [CONTRACT_ADDRESS, parsedAmount],
         });
-        // Wait a bit for approval
         await new Promise(r => setTimeout(r, 3000));
       }
 
@@ -118,27 +182,66 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
       transition={{ duration: 0.5 }}
       className="bg-surface border border-border rounded-2xl p-6 sm:p-8 md:p-10 max-w-xl"
     >
-      {/* Token Address */}
+      {/* Token Selection */}
       <div className="mb-6">
-        <label className="block text-sm font-medium text-t2 mb-2">Token contract address</label>
-        <input
-          type="text"
-          value={tokenAddr}
-          onChange={e => { setTokenAddr(e.target.value); lookupToken(e.target.value); }}
-          placeholder="0x..."
-          className="w-full px-4 py-3.5 bg-bg border border-border rounded-xl font-mono text-sm text-t1 outline-none focus:border-accent/40 transition-colors placeholder:text-t3"
-        />
-        {tokenInfo && (
+        <div className="flex justify-between items-center mb-2">
+          <label className="block text-sm font-medium text-t2">Select Token to Bury</label>
+          <button
+            onClick={() => setUseCustomMode(!useCustomMode)}
+            className="text-xs font-mono text-accent hover:text-accent2 transition-colors"
+          >
+            {useCustomMode ? '← Back to Wallet scan' : 'Paste custom address'}
+          </button>
+        </div>
+
+        {!isConnected ? (
+          <div className="w-full px-4 py-3.5 bg-bg border border-border rounded-xl text-sm text-t3 text-center">
+            Connect wallet to scan your tokens
+          </div>
+        ) : !useCustomMode ? (
+          isScanning ? (
+            <div className="w-full px-4 py-3.5 bg-bg border border-border rounded-xl text-sm text-t3 flex items-center justify-center">
+              <span className="spinner" /> Scanning wallet for shitcoins...
+            </div>
+          ) : userTokens.length === 0 ? (
+            <div className="w-full px-4 py-3.5 bg-bg border border-border rounded-xl text-sm text-t3 text-center">
+              No tokens found. <button onClick={() => setUseCustomMode(true)} className="text-accent underline">Paste address</button>
+            </div>
+          ) : (
+            <select
+              value={tokenAddr}
+              onChange={(e) => handleSelectToken(e.target.value)}
+              className="w-full px-4 py-3.5 bg-bg border border-border rounded-xl font-mono text-sm text-t1 outline-none focus:border-accent/40 transition-colors"
+            >
+              <option value="" disabled>-- Select a token from your wallet --</option>
+              {userTokens.map(t => (
+                <option key={t.address} value={t.address} className="bg-bg text-t1">
+                  {parseFloat(t.balance).toFixed(2)} ${t.symbol} ({t.name})
+                </option>
+              ))}
+            </select>
+          )
+        ) : (
+          <input
+            type="text"
+            value={tokenAddr}
+            onChange={e => { setTokenAddr(e.target.value); lookupToken(e.target.value); }}
+            placeholder="0x..."
+            className="w-full px-4 py-3.5 bg-bg border border-border rounded-xl font-mono text-sm text-t1 outline-none focus:border-accent/40 transition-colors placeholder:text-t3"
+          />
+        )}
+
+        {tokenInfo && useCustomMode && (
           <p className="mt-2 text-xs font-mono text-green-500">
             {tokenInfo.name} (${tokenInfo.symbol}) — Balance: {parseFloat(tokenInfo.balance).toFixed(2)}
           </p>
         )}
-        {tokenError && <p className="mt-2 text-xs font-mono text-red-400">{tokenError}</p>}
+        {tokenError && useCustomMode && <p className="mt-2 text-xs font-mono text-red-400">{tokenError}</p>}
       </div>
 
       {/* Amount */}
       <div className="mb-6">
-        <label className="block text-sm font-medium text-t2 mb-2">Amount to bury</label>
+        <label className="block text-sm font-medium text-t2 mb-2">Amount to bury (Max auto-filled)</label>
         <input
           type="number"
           value={amount}
