@@ -180,9 +180,10 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
     setEpitaph(EPITAPHS[Math.floor(Math.random() * EPITAPHS.length)]);
   };
 
-  // Guardrail logic
+  // Guardrail logic with valid amount check
   const isHighValue = tokenInfo !== null && tokenInfo.fiatValue >= 5.0;
-  const isReadyToBury = isConnected && step === 'idle' && tokenAddr && amount && epitaph && isConfirmed;
+  const isValidAmount = amount !== '' && Number(amount) > 0;
+  const isReadyToBury = isConnected && step === 'idle' && tokenAddr && isValidAmount && epitaph && isConfirmed;
 
   return (
     <motion.div
@@ -320,7 +321,8 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
           value={amount}
           onChange={e => setAmount(e.target.value)}
           placeholder="1000000"
-          min="1"
+          min="0"
+          step="any"
           className="w-full px-4 py-3.5 bg-bg border border-border rounded-xl font-mono text-sm text-t1 outline-none focus:border-accent/40 transition-colors placeholder:text-t3"
         />
       </div>
@@ -358,7 +360,7 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
       </div>
 
       {/* Mandatory Confirmation Checkbox */}
-      {tokenInfo && amount && epitaph && (
+      {tokenInfo && (
         <motion.div
           initial={{ opacity: 0, height: 0 }}
           animate={{ opacity: 1, height: 'auto' }}
@@ -385,16 +387,21 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
         </motion.div>
       )}
 
-      {/* Button */}
+      {/* Smart Button */}
       <button
         onClick={handleBury}
         disabled={!isReadyToBury}
         className="w-full py-4 rounded-xl bg-red-800/80 text-t1 font-bold text-[15px] hover:bg-red-700/80 transition-all hover:-translate-y-0.5 hover:shadow-[0_4px_20px_rgba(160,64,64,0.3)] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none"
       >
-        {step === 'approving' && <><span className="spinner" /> Approving...</>}
-        {step === 'burying' && <><span className="spinner" /> Burying token...</>}
-        {step === 'done' && '&#9760; Token buried! NFT minted!'}
-        {step === 'idle' && (isConnected ? 'Bury this token forever' : 'Connect wallet to bury')}
+        {step === 'approving' ? <><span className="spinner" /> Approving...</> :
+          step === 'burying' ? <><span className="spinner" /> Burying token...</> :
+            step === 'done' ? '&#9760; Token buried! NFT minted!' :
+              !isConnected ? 'Connect wallet to bury' :
+                !tokenAddr ? 'Select a token first' :
+                  !isValidAmount ? 'Enter a valid amount' :
+                    !epitaph ? 'Write an epitaph' :
+                      !isConfirmed ? 'Check the confirmation box' :
+                        'Bury this token forever'}
       </button>
     </motion.div>
   );
