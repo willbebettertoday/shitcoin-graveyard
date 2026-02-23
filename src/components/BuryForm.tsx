@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useAccount, useReadContract, useWriteContract } from 'wagmi';
 import { parseUnits, formatUnits, isAddress } from 'viem';
 import { readContract } from '@wagmi/core';
@@ -39,10 +39,11 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
   const [tokenError, setTokenError] = useState('');
   const [step, setStep] = useState<'idle' | 'approving' | 'burying' | 'done'>('idle');
 
-  // New state for Auto-Discovery
+  // Scanner & UI State
   const [userTokens, setUserTokens] = useState<TokenData[]>([]);
   const [isScanning, setIsScanning] = useState(false);
   const [useCustomMode, setUseCustomMode] = useState(false);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
   const { data: fee } = useReadContract({
     address: CONTRACT_ADDRESS, abi: GRAVEYARD_ABI, functionName: 'burialFee',
@@ -50,7 +51,7 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
 
   const { writeContractAsync } = useWriteContract();
 
-  // Scan wallet for tokens using Blockscout API
+  // Aggressive Scan wallet using Blockscout API
   useEffect(() => {
     if (!address) {
       setUserTokens([]);
@@ -63,12 +64,15 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
         const res = await fetch(`https://base.blockscout.com/api/v2/addresses/${address}/token-balances`);
         const data = await res.json();
 
-        if (data && Array.isArray(data)) {
-          const erc20 = data
-            .filter((t: any) => t.token?.type === 'ERC-20' && t.value !== '0')
+        // Blockscout returns data in { items: [...] } or directly as array
+        const items = Array.isArray(data) ? data : (data.items || []);
+
+        if (items && items.length > 0) {
+          const erc20 = items
+            .filter((t: any) => t.value !== '0' && t.token?.type === 'ERC-20')
             .map((t: any) => ({
               address: t.token.address,
-              name: t.token.name || 'Unknown',
+              name: t.token.name || 'Unknown Shitcoin',
               symbol: t.token.symbol || '???',
               decimals: Number(t.token.decimals || 18),
               balance: formatUnits(BigInt(t.value), Number(t.token.decimals || 18))
@@ -84,7 +88,7 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
     fetchTokens();
   }, [address]);
 
-  // Manual lookup for custom mode
+  // Manual lookup
   const lookupToken = useCallback(async (addr: string) => {
     setTokenInfo(null);
     setTokenError('');
@@ -111,21 +115,12 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
     }
   }, [address]);
 
-  // Handle Token Selection from Dropdown
-  const handleSelectToken = (selectedAddress: string) => {
-    if (!selectedAddress) {
-      setTokenAddr('');
-      setTokenInfo(null);
-      setAmount('');
-      return;
-    }
-    const token = userTokens.find(t => t.address === selectedAddress);
-    if (token) {
-      setTokenAddr(token.address);
-      setTokenInfo(token);
-      setAmount(token.balance); // Auto-fill max balance!
-      setTokenError('');
-    }
+  const handleSelectToken = (token: TokenData) => {
+    setTokenAddr(token.address);
+    setTokenInfo(token);
+    setAmount(token.balance); // Auto-fill max
+    setTokenError('');
+    setIsDropdownOpen(false);
   };
 
   const handleBury = async () => {
@@ -134,9 +129,8 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
 
     try {
       const parsedAmount = parseUnits(amount, tokenInfo.decimals);
-
-      // Step 1: Approve
       setStep('approving');
+
       const allowance = await readContract(config, {
         address: tokenAddr as `0x${string}`, abi: ERC20_ABI, functionName: 'allowance',
         args: [address, CONTRACT_ADDRESS],
@@ -150,7 +144,6 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
         await new Promise(r => setTimeout(r, 3000));
       }
 
-      // Step 2: Bury
       setStep('burying');
       const buryHash = await writeContractAsync({
         address: CONTRACT_ADDRESS, abi: GRAVEYARD_ABI, functionName: 'buryToken',
@@ -161,7 +154,6 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
       setStep('done');
       setTokenAddr(''); setAmount(''); setEpitaph(''); setTokenInfo(null);
       onSuccess?.();
-
       setTimeout(() => setStep('idle'), 3000);
     } catch (e: any) {
       setStep('idle');
@@ -182,12 +174,20 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
       transition={{ duration: 0.5 }}
       className="bg-surface border border-border rounded-2xl p-6 sm:p-8 md:p-10 max-w-xl"
     >
+      {/* Click Outside Overlay for Dropdown */}
+      {isDropdownOpen && (
+        <div
+          className="fixed inset-0 z-30"
+          onClick={() => setIsDropdownOpen(false)}
+        />
+      )}
+
       {/* Token Selection */}
-      <div className="mb-6">
+      <div className="mb-6 relative">
         <div className="flex justify-between items-center mb-2">
           <label className="block text-sm font-medium text-t2">Select Token to Bury</label>
           <button
-            onClick={() => setUseCustomMode(!useCustomMode)}
+            onClick={() => { setUseCustomMode(!useCustomMode); setIsDropdownOpen(false); }}
             className="text-xs font-mono text-accent hover:text-accent2 transition-colors"
           >
             {useCustomMode ? '← Back to Wallet scan' : 'Paste custom address'}
@@ -199,28 +199,67 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
             Connect wallet to scan your tokens
           </div>
         ) : !useCustomMode ? (
-          isScanning ? (
-            <div className="w-full px-4 py-3.5 bg-bg border border-border rounded-xl text-sm text-t3 flex items-center justify-center">
-              <span className="spinner" /> Scanning wallet for shitcoins...
-            </div>
-          ) : userTokens.length === 0 ? (
-            <div className="w-full px-4 py-3.5 bg-bg border border-border rounded-xl text-sm text-t3 text-center">
-              No tokens found. <button onClick={() => setUseCustomMode(true)} className="text-accent underline">Paste address</button>
-            </div>
-          ) : (
-            <select
-              value={tokenAddr}
-              onChange={(e) => handleSelectToken(e.target.value)}
-              className="w-full px-4 py-3.5 bg-bg border border-border rounded-xl font-mono text-sm text-t1 outline-none focus:border-accent/40 transition-colors"
-            >
-              <option value="" disabled>-- Select a token from your wallet --</option>
-              {userTokens.map(t => (
-                <option key={t.address} value={t.address} className="bg-bg text-t1">
-                  {parseFloat(t.balance).toFixed(2)} ${t.symbol} ({t.name})
-                </option>
-              ))}
-            </select>
-          )
+          <div className="relative z-40">
+            {isScanning ? (
+              <div className="w-full px-4 py-3.5 bg-bg border border-border rounded-xl text-sm text-t3 flex items-center justify-center">
+                <span className="spinner" /> Scanning for dead tokens...
+              </div>
+            ) : userTokens.length === 0 ? (
+              <div className="w-full px-4 py-3.5 bg-bg border border-border rounded-xl text-sm text-t3 text-center">
+                No tokens found. <button onClick={() => setUseCustomMode(true)} className="text-accent underline">Paste address</button>
+              </div>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                  className="w-full px-4 py-3.5 bg-bg border border-border rounded-xl font-mono text-sm text-t1 outline-none focus:border-accent/40 transition-colors flex justify-between items-center text-left"
+                >
+                  {tokenInfo ? (
+                    <span className="truncate pr-4">
+                      {parseFloat(tokenInfo.balance).toFixed(2)} <span className="text-accent font-bold">${tokenInfo.symbol}</span>
+                    </span>
+                  ) : (
+                    <span className="text-t3">-- Click to select a shitcoin --</span>
+                  )}
+                  <span className={`text-t3 transition-transform duration-300 ${isDropdownOpen ? 'rotate-180' : ''}`}>▼</span>
+                </button>
+
+                <AnimatePresence>
+                  {isDropdownOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -10, scale: 0.98 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -10, scale: 0.98 }}
+                      transition={{ duration: 0.2 }}
+                      className="absolute top-full left-0 right-0 mt-2 bg-surface2 border border-border rounded-xl shadow-2xl overflow-hidden max-h-64 overflow-y-auto backdrop-blur-xl"
+                    >
+                      {userTokens.map(t => (
+                        <button
+                          key={t.address}
+                          type="button"
+                          onClick={() => handleSelectToken(t)}
+                          className="w-full px-4 py-3 flex justify-between items-center text-left hover:bg-white/[0.03] border-b border-border/50 last:border-0 transition-colors group"
+                        >
+                          <div className="flex flex-col overflow-hidden pr-4">
+                            <span className="font-mono text-sm font-bold text-t1 group-hover:text-accent transition-colors">
+                              ${t.symbol}
+                            </span>
+                            <span className="text-[10px] text-t3 truncate uppercase mt-0.5">
+                              {t.name}
+                            </span>
+                          </div>
+                          <span className="font-mono text-xs text-t2 shrink-0">
+                            {parseFloat(t.balance).toFixed(2)}
+                          </span>
+                        </button>
+                      ))}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </>
+            )}
+          </div>
         ) : (
           <input
             type="text"
