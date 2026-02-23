@@ -46,13 +46,15 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
   const [useCustomMode, setUseCustomMode] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
+  // Universal Guardrail
+  const [isConfirmed, setIsConfirmed] = useState(false);
+
   const { data: fee } = useReadContract({
     address: CONTRACT_ADDRESS, abi: GRAVEYARD_ABI, functionName: 'burialFee',
   });
 
   const { writeContractAsync } = useWriteContract();
 
-  // Scan wallet using Blockscout API
   useEffect(() => {
     if (!address) {
       setUserTokens([]);
@@ -89,10 +91,10 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
     fetchTokens();
   }, [address]);
 
-  // Manual lookup
   const lookupToken = useCallback(async (addr: string) => {
     setTokenInfo(null);
     setTokenError('');
+    setIsConfirmed(false); // Reset confirmation
     if (!addr || addr.length !== 42 || !isAddress(addr)) return;
 
     try {
@@ -119,9 +121,10 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
   const handleSelectToken = (token: TokenData) => {
     setTokenAddr(token.address);
     setTokenInfo(token);
-    setAmount(token.balance); // Auto-fill max
+    setAmount(token.balance);
     setTokenError('');
     setIsDropdownOpen(false);
+    setIsConfirmed(false); // Reset confirmation on new selection
   };
 
   const playChurchBell = () => {
@@ -163,6 +166,7 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
       setStep('done');
       playChurchBell();
       setTokenAddr(''); setAmount(''); setEpitaph(''); setTokenInfo(null);
+      setIsConfirmed(false);
       onSuccess?.();
       setTimeout(() => setStep('idle'), 3000);
     } catch (e: any) {
@@ -176,6 +180,10 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
     setEpitaph(EPITAPHS[Math.floor(Math.random() * EPITAPHS.length)]);
   };
 
+  // Guardrail logic
+  const isHighValue = tokenInfo !== null && tokenInfo.fiatValue >= 5.0;
+  const isReadyToBury = isConnected && step === 'idle' && tokenAddr && amount && epitaph && isConfirmed;
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -184,7 +192,6 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
       transition={{ duration: 0.5 }}
       className="bg-surface border border-border rounded-2xl p-6 sm:p-8 md:p-10 max-w-xl relative"
     >
-      {/* Invisible overlay to close dropdown when clicking outside */}
       {isDropdownOpen && (
         <div
           className="fixed inset-0 z-30"
@@ -220,7 +227,6 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
               </div>
             ) : (
               <>
-                {/* Premium Custom Trigger Button */}
                 <button
                   type="button"
                   onClick={() => setIsDropdownOpen(!isDropdownOpen)}
@@ -246,7 +252,6 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
                   </svg>
                 </button>
 
-                {/* Premium Custom Dropdown Menu */}
                 <AnimatePresence>
                   {isDropdownOpen && (
                     <motion.div
@@ -352,10 +357,38 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
         </span>
       </div>
 
+      {/* Mandatory Confirmation Checkbox */}
+      {tokenInfo && amount && epitaph && (
+        <motion.div
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: 'auto' }}
+          className="mb-6"
+        >
+          <label className={`flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-colors ${isHighValue ? 'bg-red-900/10 border-red-500/30' : 'bg-surface2 border-border/50 hover:border-border'}`}>
+            <div className="pt-0.5">
+              <input
+                type="checkbox"
+                checked={isConfirmed}
+                onChange={(e) => setIsConfirmed(e.target.checked)}
+                className="w-4 h-4 rounded border-gray-600 bg-bg text-accent focus:ring-accent focus:ring-offset-bg"
+              />
+            </div>
+            <div className="flex-1">
+              <p className={`text-sm font-medium ${isHighValue ? 'text-red-400' : 'text-t1'}`}>
+                {isHighValue ? '⚠️ Warning: This token might be valuable.' : 'I understand this is irreversible.'}
+              </p>
+              <p className="text-xs text-t3 mt-1 leading-relaxed">
+                By checking this, I confirm that I want to send these tokens to the graveyard. They will be burned and cannot be recovered by anyone.
+              </p>
+            </div>
+          </label>
+        </motion.div>
+      )}
+
       {/* Button */}
       <button
         onClick={handleBury}
-        disabled={!isConnected || step !== 'idle' || !tokenAddr || !amount || !epitaph}
+        disabled={!isReadyToBury}
         className="w-full py-4 rounded-xl bg-red-800/80 text-t1 font-bold text-[15px] hover:bg-red-700/80 transition-all hover:-translate-y-0.5 hover:shadow-[0_4px_20px_rgba(160,64,64,0.3)] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none"
       >
         {step === 'approving' && <><span className="spinner" /> Approving...</>}
