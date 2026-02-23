@@ -216,11 +216,11 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
                   className={`w-full px-4 py-3.5 bg-bg border rounded-xl transition-all flex justify-between items-center text-left group ${isDropdownOpen ? 'border-accent/50 shadow-[0_0_15px_rgba(201,168,124,0.1)]' : 'border-border hover:border-border/80'}`}
                 >
                   {tokenInfo ? (
-                    <div className="flex flex-col overflow-hidden pr-4">
-                      <span className="font-mono text-sm text-t1 font-bold">
+                    <div className="flex flex-col min-w-0 flex-1 pr-4">
+                      <span className="font-mono text-sm text-t1 font-bold truncate block w-full">
                         {parseFloat(tokenInfo.balance).toLocaleString('en-US', { maximumFractionDigits: 4 })} <span className="text-accent">${tokenInfo.symbol}</span>
                       </span>
-                      <span className="text-[11px] text-t3 mt-0.5 truncate max-w-[200px] sm:max-w-[300px]">
+                      <span className="text-[11px] text-t3 mt-0.5 truncate block w-full">
                         {tokenInfo.name}
                       </span>
                     </div>
@@ -253,16 +253,16 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
                             onClick={() => handleSelectToken(t)}
                             className="w-full text-left p-3 flex justify-between items-center rounded-lg hover:bg-accent/10 transition-colors group"
                           >
-                            <div className="flex flex-col overflow-hidden pr-4 w-2/3">
-                              <span className="font-mono text-sm font-bold text-t1 group-hover:text-accent transition-colors truncate">
+                            <div className="flex flex-col min-w-0 flex-1 pr-4">
+                              <span className="font-mono text-sm font-bold text-t1 group-hover:text-accent transition-colors truncate block w-full">
                                 ${t.symbol}
                               </span>
-                              <span className="text-[11px] text-t3 truncate mt-0.5">
+                              <span className="text-[11px] text-t3 truncate mt-0.5 block w-full">
                                 {t.name}
                               </span>
                             </div>
-                            <div className="flex flex-col items-end shrink-0 w-1/3">
-                              <span className="font-mono text-sm font-medium text-t1 truncate max-w-full">
+                            <div className="flex flex-col items-end shrink-0 pl-2">
+                              <span className="font-mono text-sm font-medium text-t1 text-right">
                                 {parseFloat(t.balance).toLocaleString('en-US', { maximumFractionDigits: 2 })}
                               </span>
                               <span className="text-[10px] text-t3">Balance</span>
@@ -287,7 +287,7 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
         )}
 
         {tokenInfo && useCustomMode && (
-          <p className="mt-2 text-xs font-mono text-green-500">
+          <p className="mt-2 text-xs font-mono text-green-500 truncate w-full">
             {tokenInfo.name} (${tokenInfo.symbol}) — Balance: {parseFloat(tokenInfo.balance).toFixed(2)}
           </p>
         )}
