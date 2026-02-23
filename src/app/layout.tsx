@@ -10,6 +10,12 @@ export const metadata: Metadata = {
     description: 'Where dead tokens find eternal rest. Built on Base.',
     type: 'website',
   },
+  other: {
+    'fc:frame': 'vNext',
+    'fc:frame:image': 'https://shitcoin-graveyard.vercel.app/og-image.jpg',
+    'fc:frame:button:1': '🪦 Bury a Token',
+    'fc:frame:post_url': 'https://shitcoin-graveyard.vercel.app',
+  }
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

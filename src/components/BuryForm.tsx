@@ -28,6 +28,7 @@ interface TokenData {
   symbol: string;
   decimals: number;
   balance: string;
+  fiatValue: number;
 }
 
 export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
@@ -74,7 +75,8 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
               name: t.token.name || 'Unknown Shitcoin',
               symbol: t.token.symbol || '???',
               decimals: Number(t.token.decimals || 18),
-              balance: formatUnits(BigInt(t.value), Number(t.token.decimals || 18))
+              balance: formatUnits(BigInt(t.value), Number(t.token.decimals || 18)),
+              fiatValue: t.fiat_value ? parseFloat(t.fiat_value) : 0
             }));
           setUserTokens(erc20);
         }
@@ -108,7 +110,7 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
         balance = formatUnits(bal as bigint, decimals as number);
       }
 
-      setTokenInfo({ address: addr, name: name as string, symbol: symbol as string, decimals: decimals as number, balance });
+      setTokenInfo({ address: addr, name: name as string, symbol: symbol as string, decimals: decimals as number, balance, fiatValue: 0 });
     } catch {
       setTokenError('Could not read token');
     }
@@ -120,6 +122,14 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
     setAmount(token.balance); // Auto-fill max
     setTokenError('');
     setIsDropdownOpen(false);
+  };
+
+  const playChurchBell = () => {
+    try {
+      const audio = new Audio('https://cdn.pixabay.com/download/audio/2022/03/10/audio_c8c8a73467.mp3');
+      audio.volume = 0.5;
+      audio.play();
+    } catch (e) { }
   };
 
   const handleBury = async () => {
@@ -151,6 +161,7 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
       });
 
       setStep('done');
+      playChurchBell();
       setTokenAddr(''); setAmount(''); setEpitaph(''); setTokenInfo(null);
       onSuccess?.();
       setTimeout(() => setStep('idle'), 3000);
@@ -265,7 +276,9 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
                               <span className="font-mono text-sm font-medium text-t1 text-right">
                                 {parseFloat(t.balance).toLocaleString('en-US', { maximumFractionDigits: 2 })}
                               </span>
-                              <span className="text-[10px] text-t3">Balance</span>
+                              <span className={`text-[10px] mt-0.5 font-mono ${t.fiatValue > 0 ? 'text-green-500/70' : 'text-t3'}`}>
+                                ≈ ${t.fiatValue.toFixed(2)}
+                              </span>
                             </div>
                           </button>
                         ))}
