@@ -53,7 +53,7 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
       if (address) {
         const bal = await readContract(config, {
           address: addr as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [address],
-        }).catch(() => 0n);
+        }).catch(() => BigInt(0));
         balance = formatUnits(bal as bigint, decimals as number);
       }
 
