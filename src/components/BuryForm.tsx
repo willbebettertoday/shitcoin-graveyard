@@ -28,7 +28,6 @@ interface TokenData {
   symbol: string;
   decimals: number;
   balance: string;
-  fiatValue: number;
 }
 
 export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
@@ -38,6 +37,7 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
   const [epitaph, setEpitaph] = useState('');
   const [tokenInfo, setTokenInfo] = useState<TokenData | null>(null);
   const [tokenError, setTokenError] = useState('');
+  const [txError, setTxError] = useState(''); // Стейт для ошибки скам-токенов
   const [step, setStep] = useState<'idle' | 'approving' | 'burying' | 'done'>('idle');
 
   // Scanner & Custom UI State
@@ -46,15 +46,13 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
   const [useCustomMode, setUseCustomMode] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
-  // Universal Guardrail
-  const [isConfirmed, setIsConfirmed] = useState(false);
-
   const { data: fee } = useReadContract({
     address: CONTRACT_ADDRESS, abi: GRAVEYARD_ABI, functionName: 'burialFee',
   });
 
   const { writeContractAsync } = useWriteContract();
 
+  // Сканируем кошелек
   useEffect(() => {
     if (!address) {
       setUserTokens([]);
@@ -71,15 +69,21 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
 
         if (items && items.length > 0) {
           const erc20 = items
-            .filter((t: any) => t.value !== '0' && t.token?.type === 'ERC-20')
-            .map((t: any) => ({
-              address: t.token.address,
-              name: t.token.name || 'Unknown Shitcoin',
-              symbol: t.token.symbol || '???',
-              decimals: Number(t.token.decimals || 18),
-              balance: formatUnits(BigInt(t.value), Number(t.token.decimals || 18)),
-              fiatValue: t.fiat_value ? parseFloat(t.fiat_value) : 0
-            }));
+            .filter((t: any) => t.value !== '0' && (t.token?.type === 'ERC-20' || t.token?.type === 'ERC20'))
+            .map((t: any) => {
+              // Делаем агрессивный парсинг адреса, чтобы не было пустых
+              const addr = t.token?.address || t.token_address || t.address || '';
+              return {
+                address: addr,
+                name: t.token?.name || 'Unknown Shitcoin',
+                symbol: t.token?.symbol || '???',
+                decimals: Number(t.token?.decimals || 18),
+                balance: formatUnits(BigInt(t.value || 0), Number(t.token?.decimals || 18))
+              };
+            })
+            // Если у токена нет адреса смарт-контракта, его физически невозможно сжечь. Отсеиваем брак.
+            .filter((t: any) => t.address && t.address.length === 42);
+
           setUserTokens(erc20);
         }
       } catch (e) {
@@ -94,7 +98,7 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
   const lookupToken = useCallback(async (addr: string) => {
     setTokenInfo(null);
     setTokenError('');
-    setIsConfirmed(false); // Reset confirmation
+    setTxError('');
     if (!addr || addr.length !== 42 || !isAddress(addr)) return;
 
     try {
@@ -112,7 +116,7 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
         balance = formatUnits(bal as bigint, decimals as number);
       }
 
-      setTokenInfo({ address: addr, name: name as string, symbol: symbol as string, decimals: decimals as number, balance, fiatValue: 0 });
+      setTokenInfo({ address: addr, name: name as string, symbol: symbol as string, decimals: decimals as number, balance });
     } catch {
       setTokenError('Could not read token');
     }
@@ -123,8 +127,8 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
     setTokenInfo(token);
     setAmount(token.balance);
     setTokenError('');
+    setTxError('');
     setIsDropdownOpen(false);
-    setIsConfirmed(false); // Reset confirmation on new selection
   };
 
   const playChurchBell = () => {
@@ -139,6 +143,7 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
     if (!isConnected || !address || !tokenInfo || !fee) return;
     if (!tokenAddr || !amount || !epitaph) return;
 
+    setTxError('');
     try {
       const parsedAmount = parseUnits(amount, tokenInfo.decimals);
       setStep('approving');
@@ -149,7 +154,7 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
       });
 
       if ((allowance as bigint) < parsedAmount) {
-        const approveHash = await writeContractAsync({
+        await writeContractAsync({
           address: tokenAddr as `0x${string}`, abi: ERC20_ABI, functionName: 'approve',
           args: [CONTRACT_ADDRESS, parsedAmount],
         });
@@ -157,7 +162,7 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
       }
 
       setStep('burying');
-      const buryHash = await writeContractAsync({
+      await writeContractAsync({
         address: CONTRACT_ADDRESS, abi: GRAVEYARD_ABI, functionName: 'buryToken',
         args: [tokenAddr as `0x${string}`, parsedAmount, epitaph],
         value: fee,
@@ -166,13 +171,16 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
       setStep('done');
       playChurchBell();
       setTokenAddr(''); setAmount(''); setEpitaph(''); setTokenInfo(null);
-      setIsConfirmed(false);
       onSuccess?.();
       setTimeout(() => setStep('idle'), 3000);
     } catch (e: any) {
       setStep('idle');
-      if (e?.message?.includes('User rejected')) return;
+      // Если юзер сам отменил транзакцию в кошельке - просто игнорим
+      if (e?.message?.includes('User rejected') || e?.message?.includes('rejected the request')) return;
+
+      // Если транзакция упала с ошибкой смарт-контракта
       console.error(e);
+      setTxError("This scam token is a 'Honeypot'. Its smart contract is locked by the creator and blocks all transfers. No one can burn it.");
     }
   };
 
@@ -180,10 +188,8 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
     setEpitaph(EPITAPHS[Math.floor(Math.random() * EPITAPHS.length)]);
   };
 
-  // Guardrail logic with valid amount check
-  const isHighValue = tokenInfo !== null && tokenInfo.fiatValue >= 5.0;
   const isValidAmount = amount !== '' && Number(amount) > 0;
-  const isReadyToBury = isConnected && step === 'idle' && tokenAddr && isValidAmount && epitaph && isConfirmed;
+  const isReadyToBury = isConnected && step === 'idle' && tokenAddr && isValidAmount && epitaph;
 
   return (
     <motion.div
@@ -200,7 +206,7 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
         />
       )}
 
-      {/* Token Selection */}
+      {/* Выбор токена */}
       <div className="mb-6 relative">
         <div className="flex justify-between items-center mb-2">
           <label className="block text-sm font-medium text-t2">Select Token to Bury</label>
@@ -282,8 +288,8 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
                               <span className="font-mono text-sm font-medium text-t1 text-right">
                                 {parseFloat(t.balance).toLocaleString('en-US', { maximumFractionDigits: 2 })}
                               </span>
-                              <span className={`text-[10px] mt-0.5 font-mono ${t.fiatValue > 0 ? 'text-green-500/70' : 'text-t3'}`}>
-                                ≈ ${t.fiatValue.toFixed(2)}
+                              <span className="text-[10px] text-t3 mt-0.5 font-mono">
+                                Balance
                               </span>
                             </div>
                           </button>
@@ -313,7 +319,7 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
         {tokenError && useCustomMode && <p className="mt-2 text-xs font-mono text-red-400">{tokenError}</p>}
       </div>
 
-      {/* Amount */}
+      {/* Сумма */}
       <div className="mb-6">
         <label className="block text-sm font-medium text-t2 mb-2">Amount to bury (Max auto-filled)</label>
         <input
@@ -327,7 +333,7 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
         />
       </div>
 
-      {/* Epitaph */}
+      {/* Эпитафия */}
       <div className="mb-6">
         <label className="block text-sm font-medium text-t2 mb-2">Epitaph</label>
         <textarea
@@ -351,7 +357,7 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
         </div>
       </div>
 
-      {/* Fee */}
+      {/* Комиссия */}
       <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-accent/5 border border-accent/10 mb-6">
         <span className="text-sm text-t3">Burial fee</span>
         <span className="font-mono text-sm font-semibold text-accent">
@@ -359,35 +365,23 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
         </span>
       </div>
 
-      {/* Mandatory Confirmation Checkbox */}
-      {tokenInfo && (
-        <motion.div
-          initial={{ opacity: 0, height: 0 }}
-          animate={{ opacity: 1, height: 'auto' }}
-          className="mb-6"
-        >
-          <label className={`flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-colors ${isHighValue ? 'bg-red-900/10 border-red-500/30' : 'bg-surface2 border-border/50 hover:border-border'}`}>
-            <div className="pt-0.5">
-              <input
-                type="checkbox"
-                checked={isConfirmed}
-                onChange={(e) => setIsConfirmed(e.target.checked)}
-                className="w-4 h-4 rounded border-gray-600 bg-bg text-accent focus:ring-accent focus:ring-offset-bg"
-              />
+      {/* Блок для ошибки скам-токенов */}
+      <AnimatePresence>
+        {txError && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mb-6 overflow-hidden"
+          >
+            <div className="p-4 rounded-xl bg-red-900/10 border border-red-500/20 text-red-400 text-sm">
+              ⚠️ {txError}
             </div>
-            <div className="flex-1">
-              <p className={`text-sm font-medium ${isHighValue ? 'text-red-400' : 'text-t1'}`}>
-                {isHighValue ? '⚠️ Warning: This token might be valuable.' : 'I understand this is irreversible.'}
-              </p>
-              <p className="text-xs text-t3 mt-1 leading-relaxed">
-                By checking this, I confirm that I want to send these tokens to the graveyard. They will be burned and cannot be recovered by anyone.
-              </p>
-            </div>
-          </label>
-        </motion.div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {/* Smart Button */}
+      {/* Умная Кнопка */}
       <button
         onClick={handleBury}
         disabled={!isReadyToBury}
@@ -400,8 +394,7 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
                 !tokenAddr ? 'Select a token first' :
                   !isValidAmount ? 'Enter a valid amount' :
                     !epitaph ? 'Write an epitaph' :
-                      !isConfirmed ? 'Check the confirmation box' :
-                        'Bury this token forever'}
+                      'Bury this token forever'}
       </button>
     </motion.div>
   );

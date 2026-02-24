@@ -58,7 +58,7 @@ export function Graveyard({ mode, refreshKey }: { mode: 'all' | 'mine'; refreshK
               functionName: 'getTombstone', args: [BigInt(i)],
             }) as any;
             arr.push(parseTomb(i, t));
-          } catch {}
+          } catch { }
         }
         setTombs(arr);
       }
@@ -72,7 +72,7 @@ export function Graveyard({ mode, refreshKey }: { mode: 'all' | 'mine'; refreshK
     return {
       id,
       symbol: t.tokenSymbol || t[1] || '???',
-      amount: (t.amount || t[2] || 0n).toString(),
+      amount: (t.amount || t[2] || BigInt(0)).toString(),
       date: new Date(Number(t.burialDate || t[3] || 0) * 1000).toLocaleDateString(),
       epitaph: t.epitaph || t[4] || '',
       gravedigger: (() => {
