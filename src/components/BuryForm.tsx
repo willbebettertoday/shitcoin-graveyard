@@ -72,7 +72,7 @@ export function BuryForm({ onSuccess }: { onSuccess?: () => void }) {
             .filter((t: any) => t.value !== '0' && (t.token?.type === 'ERC-20' || t.token?.type === 'ERC20'))
             .map((t: any) => {
               // Делаем агрессивный парсинг адреса, чтобы не было пустых
-              const addr = t.token?.address || t.token_address || t.address || '';
+              const addr = t.token?.address_hash || t.token?.address || t.token_address || '';
               return {
                 address: addr,
                 name: t.token?.name || 'Unknown Shitcoin',
